@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Juego Estilo Asteroids</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: #000 url('https://www.transparenttextures.com/patterns/stardust.png') repeat;
+        }
+        #gameContainer {
+            width: 800px;
+            height: 600px;
+            position: relative;
+            border: 2px solid #fff;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 50px;
+            color: #fff;
+            text-align: center;
+            display: none;
+            text-shadow: 0 0 10px #00f, 0 0 20px #00f;
+            font-family: Arial, sans-serif;
+        }
+        #score {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 30px;
+            color: #fff;
+            text-shadow: 0 0 5px #0f0;
+            font-family: Arial, sans-serif;
+        }
+        #highScore {
+            position: absolute;
+            top: 40px;
+            left: 10px;
+            font-size: 20px;
+            color: #fff;
+            text-shadow: 0 0 5px #0f0;
+            font-family: Arial, sans-serif;
+        }
+        #debug {
+            position: absolute;
+            top: 70px;
+            left: 10px;
+            font-size: 20px;
+            color: #f00;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="gameOver">¡Game Over!<br>Presiona R para reiniciar</div>
+        <div id="score">Puntuación: 0</div>
+        <div id="highScore">Puntuación máxima: 0</div>
+        <div id="debug">Cargando...</div>
+    </div>
+    <audio id="explosionAudio" preload="auto" src="explosion.mp3"></audio>
+    <audio id="cancionAudio" preload="auto" loop src="cancion.mp3"></audio>
+
+    <script>
+        const container = document.getElementById('gameContainer');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 800;
+        canvas.height = 600;
+
+        const gameOverText = document.getElementById('gameOver');
+        const scoreText = document.getElementById('score');
+        const highScoreText = document.getElementById('highScore');
+        const debugText = document.getElementById('debug');
+        const explosionAudio = document.getElementById('explosionAudio');
+        const cancionAudio = document.getElementById('cancionAudio');
+
+        // Cargar imágenes
+        const spaceImg = new Image();
+        spaceImg.src = 'space.png';
+        spaceImg.onerror = () => debugText.textContent = "Error al cargar space.png";
+
+        const asteroideImg = new Image();
+        asteroideImg.src = 'asteroide.png';
+        asteroideImg.onerror = () => debugText.textContent = "Error al cargar asteroide.png";
+
+        // Objetos del juego
+        let space = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            speedX: 0,
+            speedY: 0,
+            width: 50,
+            height: 50,
+            alive: true
+        };
+
+        let projectiles = [];
+        let asteroids = [];
+        let gameOver = false;
+        let score = 0;
+        let highScore = localStorage.getItem('highScore') ? parseInt(localStorage.getItem('highScore')) : 0;
+        highScoreText.textContent = `Puntuación máxima: ${highScore}`;
+        const moveSpeed = 5;
+        const pointsLost = 10;
+        const pointsGained = 30;
+        let musicStarted = false; // Bandera para controlar la música
+
+        // Controles
+        let keys = {};
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+
+            // Iniciar música solo después de la primera interacción
+            if (!musicStarted && !gameOver) {
+                cancionAudio.play().then(() => {
+                    musicStarted = true;
+                    debugText.textContent = "Música iniciada";
+                }).catch(err => {
+                    debugText.textContent = "Error al reproducir cancion.mp3: " + err;
+                });
+            }
+
+            if (e.code === 'Space' && space.alive) {
+                projectiles.push({
+                    x: space.x,
+                    y: space.y,
+                    angle: -Math.PI / 2,
+                    speed: 10,
+                    width: 20,
+                    height: 20
+                });
+            }
+            if (e.code === 'KeyR' && gameOver) {
+                resetGame();
+            }
+        });
+        document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        // Generar asteroides
+        function spawnAsteroid() {
+            asteroids.push({
+                x: Math.random() * canvas.width,
+                y: -50,
+                speed: 2 + Math.random() * 2,
+                width: 60,
+                height: 60
+            });
+        }
+
+        // Actualizar puntuación máxima
+        function updateHighScore() {
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('highScore', highScore);
+                highScoreText.textContent = `Puntuación máxima: ${highScore}`;
+            }
+        }
+
+        // Reiniciar juego
+        function resetGame() {
+            space = {
+                x: canvas.width / 2,
+                y: canvas.height / 2,
+                speedX: 0,
+                speedY: 0,
+                width: 50,
+                height: 50,
+                alive: true
+            };
+            projectiles = [];
+            asteroids = [];
+            gameOver = false;
+            score = 0;
+            scoreText.textContent = `Puntuación: ${score}`;
+            gameOverText.style.display = 'none';
+            if (musicStarted) {
+                cancionAudio.currentTime = 0;
+                cancionAudio.play().catch(err => {
+                    debugText.textContent = "Error al reiniciar cancion.mp3: " + err;
+                });
+            }
+            gameLoop();
+        }
+
+        // Actualizar juego
+        function update() {
+            if (!space.alive || score < 0) {
+                updateHighScore();
+                gameOver = true;
+                if (musicStarted) cancionAudio.pause();
+                return;
+            }
+
+            space.speedX = 0;
+            space.speedY = 0;
+            if (keys['ArrowLeft']) space.speedX = -moveSpeed;
+            if (keys['ArrowRight']) space.speedX = moveSpeed;
+            if (keys['ArrowUp']) space.speedY = -moveSpeed;
+            if (keys['ArrowDown']) space.speedY = moveSpeed;
+
+            space.x += space.speedX;
+            space.y += space.speedY;
+
+            space.x = Math.max(space.width / 2, Math.min(canvas.width - space.width / 2, space.x));
+            space.y = Math.max(space.height / 2, Math.min(canvas.height - space.height / 2, space.y));
+
+            projectiles.forEach((p, i) => {
+                p.x += Math.cos(p.angle) * p.speed;
+                p.y += Math.sin(p.angle) * p.speed;
+                if (p.x < 0 || p.x > canvas.width || p.y < 0 || p.y > canvas.height) {
+                    projectiles.splice(i, 1);
+                }
+            });
+
+            asteroids.forEach((a, i) => {
+                a.y += a.speed;
+                if (a.y > canvas.height + 50) {
+                    asteroids.splice(i, 1);
+                    score -= pointsLost;
+                    scoreText.textContent = `Puntuación: ${score}`;
+                    if (score < 0) space.alive = false;
+                }
+            });
+
+            asteroids.forEach((a, i) => {
+                if (Math.hypot(space.x - a.x, space.y - a.y) < space.width / 2 + a.width / 2) {
+                    score -= pointsLost;
+                    scoreText.textContent = `Puntuación: ${score}`;
+                    space.alive = false;
+                    asteroids.splice(i, 1);
+                }
+            });
+
+            projectiles.forEach((p, pi) => {
+                asteroids.forEach((a, ai) => {
+                    if (Math.hypot(p.x - a.x, p.y - a.y) < p.width / 2 + a.width / 2) {
+                        explosionAudio.currentTime = 0;
+                        explosionAudio.play().catch(err => {
+                            debugText.textContent = "Error al reproducir explosion.mp3: " + err;
+                        });
+                        asteroids.splice(ai, 1);
+                        projectiles.splice(pi, 1);
+                        score += pointsGained;
+                        scoreText.textContent = `Puntuación: ${score}`;
+                    }
+                });
+            });
+
+            if (Math.random() < 0.02) spawnAsteroid();
+        }
+
+        // Dibujar juego
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (space.alive) {
+                if (spaceImg.complete && spaceImg.naturalWidth !== 0) {
+                    ctx.drawImage(spaceImg, space.x - space.width / 2, space.y - space.height / 2, space.width, space.height);
+                } else {
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(space.x - space.width / 2, space.y - space.height / 2, space.width, space.height);
+                }
+            }
+
+            projectiles.forEach(p => {
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.angle);
+                if (asteroideImg.complete && asteroideImg.naturalWidth !== 0) {
+                    ctx.drawImage(asteroideImg, -p.width / 2, -p.height / 2, p.width, p.height);
+                } else {
+                    ctx.fillStyle = '#f00';
+                    ctx.fillRect(-p.width / 2, -p.height / 2, p.width, p.height);
+                }
+                ctx.restore();
+            });
+
+            asteroids.forEach(a => {
+                if (asteroideImg.complete && asteroideImg.naturalWidth !== 0) {
+                    ctx.drawImage(asteroideImg, a.x - a.width / 2, a.y - a.height / 2, a.width, a.height);
+                } else {
+                    ctx.fillStyle = '#888';
+                    ctx.fillRect(a.x - a.width / 2, a.y - a.height / 2, a.width, a.height);
+                }
+            });
+
+            if (gameOver) {
+                gameOverText.style.display = 'block';
+            }
+        }
+
+        // Bucle del juego
+        function gameLoop() {
+            if (!gameOver) {
+                update();
+                draw();
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        // Iniciar juego
+        debugText.textContent = "Juego iniciado (presiona una tecla para música)";
+        scoreText.textContent = `Puntuación: ${score}`;
+        gameLoop();
+    </script>
+</body>
+</html>
